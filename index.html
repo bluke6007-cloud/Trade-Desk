@@ -6,7 +6,14 @@
 <meta name="color-scheme" content="light">
 <meta name="theme-color" content="#FFFFFF">
 <title>Trade Desk</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎴</text></svg>">
+<link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+<link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Trade Desk">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
@@ -899,8 +906,8 @@ function renderDetail() {
   let guard;
   if (!t.buyer_accepted_at && !t.flag) {
     guard = h("div", { class: "guard" }, h("span", { "aria-hidden": "true" }, "📨"),
-      h("span", null, h("strong", null, buyer + " has been emailed to accept this ticket. "),
-        t.buyer_id ? "" : "They need to sign up with " + t.buyer_email + " to see it. ",
+      h("span", null, h("strong", null, buyer + " must accept this ticket on Trade Desk. "),
+        t.buyer_id ? "" : "They need to sign up on Trade Desk with " + t.buyer_email + " to see it. ",
         h("strong", null, "Seller: "), "don't ship anything yet."));
   } else if (!t.accepted_at && !t.flag) {
     guard = h("div", { class: "guard" }, h("span", { "aria-hidden": "true" }, "⏳"),
@@ -909,11 +916,11 @@ function renderDetail() {
   } else if (!t.inspected_at && !t.flag) {
     guard = h("div", { class: "guard" }, h("span", { "aria-hidden": "true" }, "🛡️"),
       h("span", null, h("strong", null, "Buyer: don't pay yet. "), "Wait for this ticket to show “Verified”. ",
-        h("strong", null, "Seller: "), "ship the card only to " + mm + ", never to the buyer."));
+        h("strong", null, "Seller: "), "ship the card only to " + mm + ", never to the buyer. You pay this shipping."));
   } else if (t.inspected_at && !t.paid_at && !t.flag) {
     guard = h("div", { class: "guard" }, h("span", { "aria-hidden": "true" }, "✅"),
       h("span", null, h("strong", null, mm + " has verified the card. "), buyer + " can now pay " + seller + " " + t.price +
-        (t.pay_method ? " via " + t.pay_method : "") + "."));
+        (t.pay_method ? " via " + t.pay_method : "") + ". The buyer also pays the shipping from " + mm + "."));
   } else {
     guard = h("div", { class: "guard" }, h("span", { "aria-hidden": "true" }, "🛡️"),
       h("span", null, "Only the people on this ticket are part of this trade. Anyone else asking for payment or the card is a scammer."));
@@ -1071,7 +1078,7 @@ function openTicketForm() {
   const submitBtn = h("button", { class: "btn primary", type: "button" }, "Create ticket");
   const form = h("div", { class: "dlg" },
     h("h2", null, "New sale ticket"),
-    h("p", { style: "margin:0;color:var(--muted)" }, "You are the seller. Type the buyer's details below. The buyer is emailed first and must accept the ticket. Then the middleman is emailed to accept it too. Don't ship the card until the middleman accepts. We'll email you at each step."),
+    h("p", { style: "margin:0;color:var(--muted)" }, "You are the seller. Type the buyer's details below. The buyer must log in to Trade Desk and accept the ticket first. Then the middleman accepts it too. Don't ship the card until the middleman accepts. The seller pays shipping to the middleman and the buyer pays shipping to them. Check the ticket here to see whose turn it is."),
     S.myCell
       ? h("div", { class: "side" }, h("div", { class: "lbl" }, "Your details on this ticket (shared with the buyer and middleman)"),
           h("dl", { class: "kv" }, h("dt", null, "Name"), h("dd", null, S.me.name), h("dt", null, "Cell"), h("dd", null, S.myCell),
@@ -1082,7 +1089,7 @@ function openTicketForm() {
     h("div", { class: "cols" },
       h("div", { class: "field" }, h("label", { for: "f-bc" }, "Buyer's cell number"), f.bcell),
       h("div", { class: "field" }, h("label", { for: "f-be" }, "Buyer's email"), f.bmail)),
-    h("div", { class: "hint", style: "margin-top:-4px;color:var(--muted);font-size:13px" }, "The buyer gets an email asking them to accept. They sign up with this same email to see the ticket."),
+    h("div", { class: "hint", style: "margin-top:-4px;color:var(--muted);font-size:13px" }, "Tell the buyer to sign up on Trade Desk with this same email. They will then see the ticket and can accept it."),
     h("div", { class: "field" }, h("label", null, "Card(s) you are selling"),
       h("small", null, "For every card, add its name and a clear photo of the front and the back. The buyer and middleman can see the photos."),
       cardsBox, h("button", { class: "btn small", type: "button", id: "add-card", onclick: addRow }, "+ Add another card")),
@@ -1135,7 +1142,7 @@ function openTicketForm() {
     if (error) { err.textContent = friendly(error); return; }
     closeDlg();
     S.selected = data; S.tab = "tickets"; S.filter = "active"; $("#app").dataset.view = "detail";
-    toast(data + " created. The buyer has been emailed to accept it. Don't ship until the middleman accepts too.");
+    toast(data + " created. Tell the buyer to log in to Trade Desk and accept it. Don't ship until the middleman accepts too.");
     await refreshAll(); render();
   });
   dlg.replaceChildren(form);
@@ -1264,21 +1271,22 @@ function buildHow() {
     h("h2", null, "How a trade works"),
     h("p", { class: "lead" }, "Every sale goes through a middleman. The card goes to the middleman first, and the buyer pays only after the card has been checked. Read this before your first trade."),
     h("ol", { class: "proc" },
-      step("Seller opens a ticket", "The seller creates the ticket and types in the buyer's full name, cell number and email, plus the card(s) with a photo of the front and the back of each one, the agreed price and the payment method, and picks a middleman. The buyer is emailed straight away and has to accept the ticket first. Everyone on the ticket is emailed whenever it is their turn to act, and sees the seller's and buyer's full name, cell number and email.",
-        [["Seller", "Creates the ticket. Does not ship yet."], ["Buyer", "Gets an email, signs up with that email address if needed, checks the card, price and payment method, and accepts."], ["Middleman", "Is emailed once the buyer has accepted, checks that both people are verified, and accepts too."]]),
-      step("Seller ships the card to the middleman", "Once the middleman has accepted the ticket, the seller sends the card only to the middleman named on it, and shares the tracking number.",
-        [["Seller", "Ships to the middleman. Never to the buyer."], ["Buyer", "Waits. Does not pay yet."], ["Middleman", "Marks the card as received when it arrives."]]),
+      step("Seller opens a ticket", "The seller creates the ticket and types in the buyer's full name, cell number and email, plus the card(s) with a photo of the front and the back of each one, the agreed price and the payment method, and picks a middleman. The buyer then has to log in to Trade Desk and accept the ticket first. Each person sees on the ticket whose turn it is, and everyone on the ticket sees the seller's and buyer's full name, cell number and email.",
+        [["Seller", "Creates the ticket. Does not ship yet."], ["Buyer", "Signs up on Trade Desk with the email the seller typed (if not a member yet), checks the card, price and payment method, and accepts the ticket in the tool."], ["Middleman", "Can accept once the buyer has accepted in the tool. Checks that both people are verified, and accepts too."]]),
+      step("Seller ships the card to the middleman", "Once the middleman has accepted the ticket, the seller sends the card only to the middleman named on it, and shares the tracking number. The seller pays the shipping to the middleman.",
+        [["Seller", "Ships to the middleman and pays that shipping. Never to the buyer."], ["Buyer", "Waits. Does not pay yet."], ["Middleman", "Marks the card as received when it arrives."]]),
       step("Middleman inspects the card", "The middleman checks that the card matches the listing and the front and back photos on the ticket. If it doesn't, the ticket is flagged and the card goes back to the seller.",
         [["Middleman", "Marks the card as inspected, or flags it as failed."], ["Everyone", "The ticket status changes to “Verified · buyer can pay”."]]),
       step("Buyer pays the seller", "Only once the ticket says Verified does the buyer pay the seller, using the agreed price and method.",
         [["Buyer", "Pays the seller. Keep proof of payment."], ["Seller", "Confirms on the ticket once the money has arrived."]]),
-      step("Middleman ships to the buyer", "After the seller confirms payment, the middleman ships the card to the buyer and adds the tracking number.",
-        [["Middleman", "Ships and records tracking."], ["Buyer", "Confirms receipt. The ticket then shows Completed."]])),
+      step("Middleman ships to the buyer", "After the seller confirms payment, the middleman ships the card to the buyer and adds the tracking number. The buyer pays the shipping from the middleman to them.",
+        [["Middleman", "Ships and records tracking."], ["Buyer", "Pays the shipping to them and confirms receipt. The ticket then shows Completed."]])),
     h("div", { class: "card" }, h("h3", null, "Rules for everyone"),
       h("ul", { class: "rules" },
         h("li", null, "No ticket, no trade. If it isn't on a ticket, it isn't protected. Sellers open the ticket."),
         h("li", null, "Cards go only to an approved middleman, and only after they have accepted the ticket. Never send a card directly to the other person."),
         h("li", null, "Buyers pay only after the ticket shows Verified."),
+        h("li", null, "Shipping: the seller pays to ship the card to the middleman. The buyer pays for the middleman to ship it on to them."),
         h("li", null, "Pay and ship only to the people named on the ticket."),
         h("li", null, "Keep screenshots and tracking numbers until the ticket is Completed."),
         h("li", null, "If something feels wrong, stop and flag a dispute. Don't carry on in DMs."))),
@@ -1379,6 +1387,11 @@ sb.auth.onAuthStateChange((event, session) => {
     render();
   }, 0);
 });
+
+/* ------------------------------------------------------------------ installable app (PWA) */
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => { /* the site still works without it */ }); });
+}
 </script>
 </body>
 </html>
