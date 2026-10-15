@@ -189,6 +189,19 @@ dialog::backdrop { background: rgba(10, 14, 22, .55); }
 }
 .field textarea { min-height: 84px; resize: vertical; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.disclaimer { border: 1px solid var(--line); background: var(--surface-2); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; font-size: 14px; }
+.disclaimer h3 { font-size: 15px; margin: 0; }
+.disclaimer ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--ink); }
+.agree { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; cursor: pointer; }
+.agree input { width: 20px; height: 20px; margin-top: 1px; flex: none; accent-color: var(--primary); }
+.proofs { display: grid; gap: 10px; }
+.proofrow { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; background: var(--surface); }
+.proofrow img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; flex: none; }
+.proofrow .pdf { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); font-weight: 700; color: var(--accent-text); flex: none; text-decoration: none; }
+.proofrow small { color: var(--muted); display: block; }
+.proofup { display: grid; gap: 8px; border: 1.5px dashed var(--line); border-radius: 12px; padding: 12px; }
+.proofup input[type=file] { max-width: 100%; }
+
 .cardrow { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--surface-2); }
 .cardrow .top { display: flex; gap: 8px; align-items: center; }
 .cardrow .top input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
@@ -519,6 +532,13 @@ function ago(ts) {
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
   return Math.floor(s / 86400) + "d ago";
 }
+const TERMS_VERSION = "2026-10";
+const PROOF_TEXT = "Original, Bank Stamped and Dated Proof of Payment";
+const DISCLAIMER = [
+  "We do not take responsibility for cards damaged or lost in transit.",
+  "Step 4: Buyer is required to submit an original, Bank Stamped and Dated Proof of Payment onto the system. Should there be any query around Seller not receiving the funds, the card or cards will remain with the Middleman until resolved. Resolution of this may involve requesting statements from the sending and receiving accounts. Any disputes that are unable to be resolved in this manner will be the responsibility of the Buyer and Seller to resolve with their respective banks and provide updates on the ticket."
+];
+const disclaimerBox = () => h("div", { class: "disclaimer" }, h("h3", null, "Disclaimer"), h("ol", null, DISCLAIMER.map((t) => h("li", null, t))));
 const cleanCell = (v) => { const d = String(v || "").replace(/[^0-9+]/g, ""); return /^\+?[0-9]{9,15}$/.test(d) ? d : null; };
 const norm = (s) => String(s || "").trim().toLowerCase();
 const lines = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
@@ -550,7 +570,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 /* ------------------------------------------------------------------ state */
 const S = {
   session: null, me: null, members: [], byId: {}, vouchRows: [], tickets: [], events: [],
-  privates: {}, myCell: "", contacts: [], photos: [],
+  privates: {}, myCell: "", contacts: [], photos: [], proofs: [],
   tab: "home", filter: "active", q: "", mq: "", selected: null,
   authMode: "signin", recovery: false, ready: false
 };
@@ -596,15 +616,23 @@ async function refreshAll() {
 }
 
 async function loadEvents() {
-  if (!S.selected) { S.events = []; S.contacts = []; S.photos = []; return; }
-  const [ev, ct, ph] = await Promise.all([
+  if (!S.selected) { S.events = []; S.contacts = []; S.photos = []; S.proofs = []; return; }
+  const [ev, ct, ph, pr] = await Promise.all([
     sb.from("ticket_events").select("id, actor_id, text, created_at").eq("ticket_id", S.selected).order("id", { ascending: false }),
     sb.rpc("ticket_contacts", { p_id: S.selected }),
-    sb.from("ticket_photos").select("card_no, side, path").eq("ticket_id", S.selected).order("card_no")
+    sb.from("ticket_photos").select("card_no, side, path").eq("ticket_id", S.selected).order("card_no"),
+    sb.from("ticket_proofs").select("id, uploaded_by, path, created_at").eq("ticket_id", S.selected).order("id")
   ]);
   S.events = ev.data || [];
   S.contacts = ct.data || [];
   S.photos = ph.data || [];
+  S.proofs = pr.data || [];
+  if (S.proofs.length) {
+    try {
+      const { data } = await sb.storage.from("payment-proofs").createSignedUrls(S.proofs.map((p) => p.path), 3600);
+      S.proofs.forEach((p) => { const m = (data || []).find((x) => x.path === p.path); p.url = m && m.signedUrl; });
+    } catch (e) { /* proofs show without a preview */ }
+  }
   if (S.photos.length) {
     try {
       const { data } = await sb.storage.from(PHOTO_BUCKET).createSignedUrls(S.photos.map((p) => p.path), 3600);
@@ -668,6 +696,7 @@ function bar(t) { const n = STEPS.filter((s) => t[s.col]).length; return h("div"
 function nextAction(t) {
   const i = nextIdx(t); if (i < 0) return null;
   const s = STEPS[i];
+  if (s.key === "paid" && !S.proofs.length) return h("div", { class: "next wait" }, h("div", null, h("small", null, "Next step"), h("b", null, "Waiting for " + buyerName(t) + " to upload proof of payment")));
   if (roles(t)[s.actor]) return h("div", { class: "next" }, h("div", null, h("small", null, "Your turn"), h("b", null, VERBS[i][0].toUpperCase() + VERBS[i].slice(1))),
     h("button", { class: "btn primary", type: "button", onclick: () => rpc("advance_ticket", { p_id: t.id, p_step: s.key }) }, "Do it now"));
   return h("div", { class: "next wait" }, h("div", null, h("small", null, "Next step"), h("b", null, "Waiting for " + actorName(t, s.actor) + " to " + VERBS[i])));
@@ -733,6 +762,8 @@ function buildAuth() {
     mk("suEmail", "Email", "email", { autocomplete: "email" }),
     mk("suCell", "Cell number", "tel", { autocomplete: "tel", maxlength: "20", placeholder: "e.g. 082 123 4567" }),
     mk("suPass", "Create a password", "password", { autocomplete: "new-password", minlength: "10", placeholder: "At least 10 characters" }),
+    disclaimerBox(),
+    h("label", { class: "agree", for: "a-suAgree" }, A.suAgree = h("input", { id: "a-suAgree", type: "checkbox" }), h("span", null, "I have read and I agree to the disclaimer")),
     h("button", { class: "btn primary", type: "submit" }, "Create account"));
   A.recover = h("form", { onsubmit: (e) => { e.preventDefault(); setNewPassword(); } },
     h("h3", null, "Choose a new password"),
@@ -785,15 +816,16 @@ async function signUp() {
   if (pass.length < 10) { A.err.textContent = "Use a password of at least 10 characters."; return; }
   const cell = cleanCell(A.suCell.value);
   if (!cell) { A.err.textContent = "Enter a valid cell number, for example 082 123 4567."; return; }
+  if (!A.suAgree.checked) { A.err.textContent = "Tick the box to agree to the disclaimer before you create an account."; return; }
   const avail = await sb.rpc("name_available", { p_name: name });
   if (avail.error) { A.err.textContent = friendly(avail.error); return; }
   if (!avail.data) { A.err.textContent = "Someone with that name has already joined. Add your middle name or an initial."; return; }
   const { data, error } = await sb.auth.signUp({
     email, password: pass,
-    options: { data: { full_name: name, cell }, emailRedirectTo: location.origin + location.pathname }
+    options: { data: { full_name: name, cell, agreed_terms: "true", terms_version: TERMS_VERSION }, emailRedirectTo: location.origin + location.pathname }
   });
   if (error) { A.err.textContent = friendly(error); return; }
-  A.suPass.value = "";
+  A.suPass.value = ""; A.suAgree.checked = false;
   if (!data.session) {
     S.authMode = "signin"; renderAuth();
     A.err.textContent = "Account created. Check your email and confirm it, then sign in.";
@@ -857,11 +889,13 @@ function stepButton(t, i) {
     "Card shipped to " + buyerName(t),
     buyerName(t) + " received the card"
   ];
+  const needProof = s.key === "paid" && !done && prevDone && !S.proofs.length;
   const sub = done ? "Done " + when(done)
     : !prevDone ? "Unlocks after the previous step"
+    : needProof ? "Waiting for the buyer's proof of payment"
     : mine ? "Your turn"
     : "Waiting for " + actorName(t, s.actor);
-  const enabled = !done && prevDone && mine && !locked;
+  const enabled = !done && prevDone && mine && !locked && !needProof;
   return h("button", { class: "check", type: "button", "aria-pressed": done ? "true" : "false", disabled: !enabled,
     onclick: () => rpc("advance_ticket", { p_id: t.id, p_step: s.key }) },
     h("span", { class: "box", "aria-hidden": "true" }, "✓"),
@@ -920,7 +954,8 @@ function renderDetail() {
   } else if (t.inspected_at && !t.paid_at && !t.flag) {
     guard = h("div", { class: "guard" }, h("span", { "aria-hidden": "true" }, "✅"),
       h("span", null, h("strong", null, mm + " has verified the card. "), buyer + " can now pay " + seller + " " + t.price +
-        (t.pay_method ? " via " + t.pay_method : "") + ". The buyer also pays the shipping from " + mm + "."));
+        (t.pay_method ? " via " + t.pay_method : "") + ". The buyer also pays the shipping from " + mm + ". ",
+        h("strong", null, "Buyer: "), "upload the " + PROOF_TEXT + " on this ticket. The seller can only confirm payment after that."));
   } else {
     guard = h("div", { class: "guard" }, h("span", { "aria-hidden": "true" }, "🛡️"),
       h("span", null, "Only the people on this ticket are part of this trade. Anyone else asking for payment or the card is a scammer."));
@@ -974,6 +1009,7 @@ function renderDetail() {
               h("dt", null, "Middleman"), h("dd", null, mm, badge(t.middleman_id))))),
         contactCard(),
         photoSection(t),
+        proofSection(t),
         h("div", null,
           h("div", { class: "section-title" }, "Progress"),
           h("div", { class: "steps" },
@@ -1029,6 +1065,54 @@ function photoSection(t) {
           h("figcaption", null, side === "front" ? "Front" : "Back"));
       }))))
       : h("div", { class: "notes" }, "No photos were added to this ticket."));
+}
+
+
+/* ------------------------------------------------------------------ proof of payment */
+const PROOF_BUCKET = "payment-proofs";
+async function prepareProof(file) {
+  if (!file) throw new Error("Choose the proof of payment file first.");
+  if (file.type === "application/pdf") {
+    if (file.size > MAX_PHOTO) throw new Error("That PDF is too big. Use one under 5 MB.");
+    return file;
+  }
+  return preparePhoto(file);
+}
+async function uploadProof(t, input, btn, msg) {
+  msg.textContent = "";
+  const file = input.files && input.files[0];
+  btn.disabled = true;
+  try {
+    const blob = await prepareProof(file);
+    const pdf = blob.type === "application/pdf";
+    const path = S.session.user.id + "/" + uid8() + "-proof." + (pdf ? "pdf" : "jpg");
+    const up = await sb.storage.from(PROOF_BUCKET).upload(path, blob, { contentType: blob.type || "image/jpeg" });
+    if (up.error) throw new Error("The file could not be uploaded: " + friendly(up.error));
+    const r = await sb.rpc("add_payment_proof", { p_id: t.id, p_path: path });
+    if (r.error) throw new Error(friendly(r.error));
+    toast("Proof of payment uploaded.");
+    await refreshAll(); render();
+  } catch (e) { msg.textContent = e.message || "Upload failed. Try again."; btn.disabled = false; }
+}
+function proofSection(t) {
+  if (!t.inspected_at) return null;
+  const r = roles(t), proofs = S.proofs;
+  const canUpload = r.buyer && !t.flag && !t.delivered_at && proofs.length < 5;
+  const msg = h("div", { class: "err", role: "alert" });
+  const input = h("input", { type: "file", accept: "image/*,application/pdf", "aria-label": "Proof of payment file" });
+  const btn = h("button", { class: "btn primary small", type: "button" }, "Upload proof of payment");
+  btn.addEventListener("click", () => uploadProof(t, input, btn, msg));
+  return h("div", null, h("div", { class: "section-title" }, "Proof of payment (required)"),
+    h("p", { style: "margin:0 0 8px;color:var(--muted);font-size:14px" },
+      "The buyer must upload an ", h("strong", null, "original, Bank Stamped and Dated Proof of Payment"), " here. The seller can only confirm payment after it is uploaded."),
+    proofs.length ? h("div", { class: "proofs" }, proofs.map((p) => {
+      const pdf = /\.pdf$/i.test(p.path), who = plainName(p.uploaded_by), cap = "Proof of payment from " + who;
+      return h("div", { class: "proofrow" },
+        pdf ? h("a", { class: "pdf", href: p.url || "#", target: "_blank", rel: "noopener" }, "PDF")
+            : (p.url ? h("img", { src: p.url, alt: cap, loading: "lazy", onclick: () => showPhoto(p.url, cap) }) : h("div", { class: "pdf" }, "?")),
+        h("div", null, h("strong", null, cap), h("small", null, "Uploaded " + when(p.created_at)), pdf && p.url ? h("a", { href: p.url, target: "_blank", rel: "noopener" }, "Open the PDF") : null));
+    })) : h("div", { class: "notes" }, "No proof of payment has been uploaded yet."),
+    canUpload ? h("div", { class: "proofup", style: "margin-top:10px" }, h("label", null, "Add proof of payment (photo or PDF, max 5 MB)"), input, btn, msg) : null);
 }
 
 /* ------------------------------------------------------------------ new ticket dialog */
@@ -1277,15 +1361,16 @@ function buildHow() {
         [["Seller", "Ships to the middleman and pays that shipping. Never to the buyer."], ["Buyer", "Waits. Does not pay yet."], ["Middleman", "Marks the card as received when it arrives."]]),
       step("Middleman inspects the card", "The middleman checks that the card matches the listing and the front and back photos on the ticket. If it doesn't, the ticket is flagged and the card goes back to the seller.",
         [["Middleman", "Marks the card as inspected, or flags it as failed."], ["Everyone", "The ticket status changes to “Verified · buyer can pay”."]]),
-      step("Buyer pays the seller", "Only once the ticket says Verified does the buyer pay the seller, using the agreed price and method.",
-        [["Buyer", "Pays the seller. Keep proof of payment."], ["Seller", "Confirms on the ticket once the money has arrived."]]),
+      step("Buyer pays the seller", "Only once the ticket says Verified does the buyer pay the seller, using the agreed price and method. The buyer must also upload the required proof of payment on the ticket: an original, Bank Stamped and Dated Proof of Payment.",
+        [["Buyer", "Pays the seller and uploads the required proof of payment on the ticket (original, Bank Stamped and Dated)."], ["Seller", "Confirms on the ticket once the money has arrived. This is only possible after the proof of payment is uploaded."]]),
       step("Middleman ships to the buyer", "After the seller confirms payment, the middleman ships the card to the buyer and adds the tracking number. The buyer pays the shipping from the middleman to them.",
         [["Middleman", "Ships and records tracking."], ["Buyer", "Pays the shipping to them and confirms receipt. The ticket then shows Completed."]])),
+    h("div", { class: "card" }, disclaimerBox()),
     h("div", { class: "card" }, h("h3", null, "Rules for everyone"),
       h("ul", { class: "rules" },
         h("li", null, "No ticket, no trade. If it isn't on a ticket, it isn't protected. Sellers open the ticket."),
         h("li", null, "Cards go only to an approved middleman, and only after they have accepted the ticket. Never send a card directly to the other person."),
-        h("li", null, "Buyers pay only after the ticket shows Verified."),
+        h("li", null, "Buyers pay only after the ticket shows Verified, and upload the required proof of payment: original, Bank Stamped and Dated."),
         h("li", null, "Shipping: the seller pays to ship the card to the middleman. The buyer pays for the middleman to ship it on to them."),
         h("li", null, "Pay and ship only to the people named on the ticket."),
         h("li", null, "Keep screenshots and tracking numbers until the ticket is Completed."),
