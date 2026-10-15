@@ -906,7 +906,7 @@ function stepButton(t, i) {
     "Card shipped to " + buyerName(t),
     buyerName(t) + " received the card"
   ];
-  const needProof = s.key === "paid" && !done && prevDone && !S.proofs.length;
+  const needProof = s.key === "paid" && !done && prevDone && !S.proofs.length && !t.proof_waived_at;
   const sub = done ? "Done " + when(done)
     : !prevDone ? "Unlocks after the previous step"
     : needProof ? "Waiting for the buyer's proof of payment"
@@ -1121,7 +1121,7 @@ function proofSection(t) {
   btn.addEventListener("click", () => uploadProof(t, input, btn, msg));
   return h("div", null, h("div", { class: "section-title" }, "Proof of payment (required)"),
     h("p", { style: "margin:0 0 8px;color:var(--muted);font-size:14px" },
-      "The buyer must upload an ", h("strong", null, "original, Bank Stamped and Dated Proof of Payment"), " here. The seller can only confirm payment after it is uploaded."),
+      "The buyer must upload an ", h("strong", null, "original, Bank Stamped and Dated Proof of Payment"), " (PDF or photo) here. The process cannot continue until it is uploaded, unless the middleman chooses to continue without it."),
     proofs.length ? h("div", { class: "proofs" }, proofs.map((p) => {
       const pdf = /\.pdf$/i.test(p.path), who = plainName(p.uploaded_by), cap = "Proof of payment from " + who;
       return h("div", { class: "proofrow" },
@@ -1129,6 +1129,14 @@ function proofSection(t) {
             : (p.url ? h("img", { src: p.url, alt: cap, loading: "lazy", onclick: () => showPhoto(p.url, cap) }) : h("div", { class: "pdf" }, "?")),
         h("div", null, h("strong", null, cap), h("small", null, "Uploaded " + when(p.created_at)), pdf && p.url ? h("a", { href: p.url, target: "_blank", rel: "noopener" }, "Open the PDF") : null));
     })) : h("div", { class: "notes" }, "No proof of payment has been uploaded yet."),
+    t.proof_waived_at && !proofs.length ? h("div", { class: "notes" }, "The middleman let this ticket continue without proof of payment.") : null,
+    (r.middleman || r.admin) && !t.flag && !t.paid_at && !t.proof_waived_at && !proofs.length
+      ? h("div", { style: "margin-top:10px" },
+          h("button", { class: "btn small", type: "button", onclick: async () => {
+            if (!confirm("Continue without proof of payment? The seller will then be able to confirm payment.")) return;
+            await rpc("waive_payment_proof", { p_id: t.id });
+          } }, "Continue without proof"))
+      : null,
     canUpload ? h("div", { class: "proofup", style: "margin-top:10px" }, h("label", null, "Add proof of payment (photo or PDF, max 5 MB)"), input, btn, msg) : null);
 }
 
