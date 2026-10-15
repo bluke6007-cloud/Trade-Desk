@@ -435,6 +435,21 @@ html { overflow-y: scroll; scrollbar-gutter: stable; }
 .pol-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
 .card a.btn { text-decoration: none; justify-self: start; display: inline-block; }
 .fine-p { color: var(--muted); font-size: 13px; }
+
+.macts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+.btn.danger { color: var(--bad); border-color: var(--bad); background: var(--surface); }
+.btn.danger:hover:not(:disabled) { background: var(--bad-bg); }
+.reps { margin-top: 4px; font-size: 13.5px; }
+.reps summary { cursor: pointer; font-weight: 700; color: var(--bad); }
+.rep { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--bad); background: var(--bad-bg); border-radius: 6px; display: grid; gap: 3px; color: var(--ink); overflow-wrap: anywhere; }
+@media (max-width: 640px) { .macts { justify-content: flex-start; } }
+
+.rk-ico { display: inline-flex; vertical-align: -3px; }
+.chip.rank { font-weight: 700; display: inline-flex; align-items: center; gap: 2px; }
+.rank-bronze { background: #F6E3D0; color: #7C4A12; }
+.rank-gold { background: #FFF0A8; color: #6B4A00; }
+.rank-platinum { background: #E6EBF1; color: #3B4757; }
+.rank-diamond { background: #DDF2FD; color: #075985; }
 </style>
 </head>
 <body>
@@ -584,7 +599,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ------------------------------------------------------------------ state */
 const S = {
-  session: null, me: null, members: [], byId: {}, vouchRows: [], tickets: [], events: [],
+  session: null, me: null, members: [], byId: {}, vouchRows: [], reportRows: [], tickets: [], events: [],
   privates: {}, myCell: "", contacts: [], photos: [], proofs: [],
   tab: "home", filter: "active", q: "", mq: "", selected: null,
   authMode: "signin", recovery: false, ready: false
@@ -602,22 +617,26 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 /* ------------------------------------------------------------------ data */
 async function refreshAll() {
   if (!S.session) {
-    S.me = null; S.members = []; S.byId = {}; S.tickets = []; S.events = []; S.vouchRows = []; S.privates = {};
+    S.me = null; S.members = []; S.removed = []; S.byId = {}; S.tickets = []; S.events = []; S.vouchRows = []; S.reportRows = []; S.privates = {};
     S.ready = true;
     return;
   }
   const uid = S.session.user.id;
   try { await sb.rpc("claim_my_tickets"); } catch (e) { /* older databases may not have it */ }
-  const [me, dir, vouches, tickets] = await Promise.all([
+  const [me, dir, vouches, reports, tickets] = await Promise.all([
     sb.from("profiles").select("*").eq("id", uid).maybeSingle(),
     sb.from("member_directory").select("*").order("name"),
     sb.from("vouches").select("voucher_id, vouchee_id"),
+    sb.from("member_reports").select("id, reported_id, reporter_id, reason, created_at").order("created_at", { ascending: false }),
     sb.from("tickets").select("*").order("updated_at", { ascending: false }).limit(300)
   ]);
   S.me = me.data || null;
-  S.members = dir.data || [];
-  S.byId = Object.fromEntries(S.members.map((m) => [m.id, m]));
+  const everyone = dir.data || [];
+  S.members = everyone.filter((m) => !m.removed_at);
+  S.removed = everyone.filter((m) => m.removed_at);
+  S.byId = Object.fromEntries(everyone.map((m) => [m.id, m]));
   S.vouchRows = vouches.data || [];
+  S.reportRows = reports.data || [];
   S.tickets = tickets.data || [];
   const mine = await sb.from("profile_private").select("cell").eq("user_id", uid).maybeSingle();
   S.myCell = (mine.data && mine.data.cell) || "";
@@ -666,7 +685,7 @@ function subscribeRealtime() {
   if (channel) { sb.removeChannel(channel); channel = null; }
   if (!S.session) return;
   channel = sb.channel("trade-desk");
-  for (const table of ["tickets", "ticket_events", "profiles", "vouches"]) {
+  for (const table of ["tickets", "ticket_events", "profiles", "vouches", "member_reports"]) {
     channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleRefresh);
   }
   channel.subscribe();
@@ -1263,18 +1282,88 @@ let membersBuilt = false;
 function vouchersOf(id) {
   return S.vouchRows.filter((v) => v.vouchee_id === id && isVerified(v.voucher_id)).map((v) => plainName(v.voucher_id));
 }
+const RANKS = [
+  { key: "diamond", name: "Diamond", min: 20, color: "#38BDF8", dark: "#0369A1" },
+  { key: "platinum", name: "Platinum", min: 10, color: "#CBD5E1", dark: "#64748B" },
+  { key: "gold", name: "Gold", min: 5, color: "#FAD724", dark: "#A16207" },
+  { key: "bronze", name: "Bronze", min: 3, color: "#CD7F32", dark: "#7C4A12" }
+];
+const rankOf = (n) => RANKS.find((r) => Number(n) >= r.min) || null;
+function rankIcon(r) {
+  const gem = r.key === "diamond"
+    ? '<path d="M8 3h8l4 5-8 12L4 8z" fill="' + r.color + '" stroke="' + r.dark + '" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 8h16M9 3l3 5 3-5M12 8v12" fill="none" stroke="' + r.dark + '" stroke-width="1.2" stroke-linejoin="round"/>'
+    : '<circle cx="12" cy="9" r="6.5" fill="' + r.color + '" stroke="' + r.dark + '" stroke-width="1.6"/><path d="M8.5 15L7 22l5-3 5 3-1.5-7" fill="' + r.dark + '"/><path d="M12 5.5l1.1 2.3 2.5.3-1.8 1.7.5 2.5-2.3-1.2-2.3 1.2.5-2.5-1.8-1.7 2.5-.3z" fill="' + (r.key === "gold" ? "#fff" : r.dark) + '" opacity=".9"/>';
+  const el = document.createElement("span");
+  el.className = "rk-ico";
+  el.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' + gem + '</svg>';
+  return el;
+}
+function rankBadge(n) {
+  const r = rankOf(n);
+  if (!r) return null;
+  return h("span", { class: "chip rank rank-" + r.key, title: r.name + " trader: " + plural(Number(n), "trade") }, rankIcon(r), " " + r.name);
+}
+function rankProgress(n) {
+  n = Number(n) || 0;
+  const next = RANKS.slice().reverse().find((r) => n < r.min);
+  const cur = rankOf(n);
+  return (cur ? cur.name + " rank. " : "No rank yet. ") + (next ? (next.min - n) + " more " + ((next.min - n) === 1 ? "trade" : "trades") + " to " + next.name + "." : "You have reached the top rank.");
+}
+function reportsOf(id) { return S.reportRows.filter((r) => r.reported_id === id); }
 function memberRow(m) {
   const isMe = S.me && m.id === S.me.id;
   const iVouched = S.vouchRows.some((v) => v.voucher_id === (S.me && S.me.id) && v.vouchee_id === m.id);
   const canVouch = !!(S.me && S.me.verified_at) && !isMe;
   const by = vouchersOf(m.id);
+  const reps = reportsOf(m.id), n = reps.length;
+  const mine = S.me && reps.some((r) => r.reporter_id === S.me.id);
+  const list = n ? h("details", { class: "reps" }, h("summary", null, "See the " + (n === 1 ? "report" : n + " reports")),
+    reps.map((r) => h("div", { class: "rep" },
+      h("div", null, h("strong", null, plainName(r.reporter_id)), " \u00b7 " + when(r.created_at)),
+      h("div", null, r.reason),
+      isAdmin() ? h("button", { class: "linkbtn", type: "button", onclick: () => { if (confirm("Remove this report?")) rpc("dismiss_report", { p_id: r.id }, "Report removed."); } }, "Remove report") : null)),
+    h("p", { class: "fine-p" }, "Reports are opinions from members, not proven facts. Check before you trade.")) : null;
   return h("div", { class: "mrow" },
     h("div", { class: "l" },
       h("span", { class: "nm" }, av(m.id), m.name, isMe ? " (you)" : "",
         m.role !== "member" ? h("span", { class: "chip tone-info" }, m.role === "admin" ? "Admin" : "Middleman") : null,
-        badge(m.id)),
-      h("span", { class: "sm" }, "Joined " + when(m.created_at) + ". " + (by.length ? "Vouched by " + by.join(", ") : "No vouches yet"))),
-    canVouch && h("button", { class: "btn small" + (iVouched ? "" : " primary"), type: "button", onclick: () => toggleVouch(m.id, iVouched) }, iVouched ? "Remove vouch" : "Vouch"));
+        badge(m.id),
+        rankBadge(m.trade_count),
+        n ? h("span", { class: "chip tone-bad" }, plural(n, "report")) : null),
+      h("span", { class: "sm" }, "Joined " + when(m.created_at) + ". " + plural(Number(m.trade_count) || 0, "trade") + " done. " + (by.length ? "Vouched by " + by.join(", ") : "No vouches yet") + ". " + (n ? plural(n, "report") : "No reports")),
+      list),
+    h("div", { class: "macts" },
+      canVouch && h("button", { class: "btn small" + (iVouched ? "" : " primary"), type: "button", onclick: () => toggleVouch(m.id, iVouched) }, iVouched ? "Remove vouch" : "Vouch"),
+      S.me && !isMe && (mine
+        ? h("button", { class: "btn small", type: "button", onclick: () => rpc("withdraw_report", { p_member: m.id }, "Report withdrawn.") }, "Withdraw report")
+        : h("button", { class: "btn small danger", type: "button", onclick: () => openReport(m) }, "Report")),
+      isAdmin() && !isMe && m.role !== "admin" && h("button", { class: "btn small danger", type: "button", onclick: () => removeMember(m) }, "Remove member")));
+}
+function removeMember(m) {
+  if (!confirm("Remove " + m.name + " from Trade Desk? They will be signed out of the member list and cannot log in. Their past tickets stay on record. You can restore them later from the Admin tab.")) return;
+  rpc("remove_member", { p_user: m.id }, m.name + " removed.");
+}
+function openReport(m) {
+  const reason = h("textarea", { id: "rp-why", rows: "4", maxlength: "300", placeholder: "What happened? Be factual. For example: \u201cPaid for a card on 3 Oct and never received it.\u201d" });
+  const err = h("div", { class: "err", role: "alert" });
+  const count = h("small", null, "0 / 300");
+  reason.addEventListener("input", () => { count.textContent = reason.value.length + " / 300"; });
+  const send = h("button", { class: "btn primary", type: "submit" }, "Send report");
+  const form = h("form", { class: "dlg", onsubmit: async (e) => {
+    e.preventDefault(); err.textContent = "";
+    if (reason.value.trim().length < 10) { err.textContent = "Please explain what happened (at least 10 characters)."; return; }
+    send.disabled = true;
+    const { error } = await sb.rpc("report_member", { p_member: m.id, p_reason: reason.value });
+    if (error) { err.textContent = friendly(error); send.disabled = false; return; }
+    closeDlg(); toast("Report sent."); await refreshAll(); render();
+  } },
+    h("h2", null, "Report " + m.name),
+    h("p", { style: "margin:0;color:var(--muted);font-size:14px" }, "Everyone on Trade Desk can see this report, including your name. Only report real problems. False reports can get you removed."),
+    h("div", { class: "field" }, h("label", { for: "rp-why" }, "What happened?"), reason, count),
+    err,
+    h("div", { class: "dlg-actions" }, h("button", { class: "btn", type: "button", onclick: closeDlg }, "Cancel"), send));
+  dlg.replaceChildren(form);
+  dlg.showModal();
 }
 async function toggleVouch(id, has) {
   const q = has
@@ -1310,7 +1399,8 @@ function renderMembers() {
     me ? h("p", null, h("strong", null, me.name), " ",
       me.verified_at ? h("span", { class: "chip tone-good" }, "✓ Verified") : h("span", { class: "chip tone-warn" }, "Waiting for an admin to verify you")) : null,
     me && !me.verified_at ? h("p", { style: "color:var(--muted)" }, "The admin will check your identity with you directly, for example on a video call. Once verified you can vouch for other members.") : null,
-    me && me.verified_at ? h("p", { style: "color:var(--muted)" }, "You can vouch for people you've personally traded with.") : null].filter(Boolean));
+    me && me.verified_at ? h("p", { style: "color:var(--muted)" }, "You can vouch for people you've personally traded with.") : null,
+    me && S.byId[me.id] ? h("p", null, rankBadge(S.byId[me.id].trade_count), " ", h("span", { style: "color:var(--muted)" }, plural(Number(S.byId[me.id].trade_count) || 0, "trade") + " completed. " + rankProgress(S.byId[me.id].trade_count))) : null].filter(Boolean));
   const ci = $("#m-cell");
   if (ci && !ci.value && document.activeElement !== ci) ci.value = S.myCell || "";
   $("#m-cell-msg").textContent = S.myCell ? "Shared with the seller, buyer and middleman on tickets you are part of, and with admins." : "Add your cell number. You need one before you can open a ticket or be named on one.";
@@ -1353,6 +1443,7 @@ function renderAdmin() {
           if (note.length < 3) { toast("Write how you verified them first."); return; }
           rpc("verify_member", { p_user: m.id, p_note: note }, m.name + " verified.");
         } }, "Verify"),
+        m.id !== S.me.id && m.role !== "admin" && h("button", { class: "btn small danger", type: "button", onclick: () => removeMember(m) }, "Remove"),
         verifiedList && h("button", { class: "btn small danger", type: "button", onclick: () => rpc("revoke_verification", { p_user: m.id }, "Verification removed.") }, "Revoke"),
         verifiedList && (() => {
           const sel = h("select", { class: "field-select", "aria-label": "Role for " + m.name, disabled: m.id === S.me.id },
@@ -1369,7 +1460,11 @@ function renderAdmin() {
     ...(pending.length ? pending.map((m) => memberRowAdmin(m, false)) : [h("div", { class: "empty" }, "Nobody is waiting.")]));
   AD.verified.replaceChildren(
     h("div", { class: "section-title" }, "Verified members (" + verified.length + ")"),
-    ...verified.map((m) => memberRowAdmin(m, true)));
+    ...verified.map((m) => memberRowAdmin(m, true)),
+    ...(S.removed.length ? [h("div", { class: "section-title" }, "Removed members (" + S.removed.length + ")"),
+      ...S.removed.map((m) => h("div", { class: "mrow" },
+        h("div", { class: "l" }, h("span", { class: "nm" }, m.name), h("span", { class: "sm" }, "Removed " + when(m.removed_at) + ". " + plural(Number(m.trade_count) || 0, "trade") + " done.")),
+        h("button", { class: "btn small", type: "button", onclick: () => rpc("restore_member", { p_user: m.id }, m.name + " restored.") }, "Restore")))] : []));
 }
 
 /* ------------------------------------------------------------------ how it works */
@@ -1441,7 +1536,13 @@ function buildPolicy() {
       "Give your real full name, cell number and email. Your full name is your username and other members can see it.",
       "Describe cards honestly and photograph the front and back clearly.",
       "Keep the conversation about a trade on its ticket. Flag a dispute instead of carrying on in private messages.",
-      "Never share your password. Nobody from Trade Desk will ask for it or for a photo of your ID."]),
+      "Never share your password. Nobody from Trade Desk will ask for it or for a photo of your ID.",
+      "You can report a member on the Members page. Reports, with your name and reason, are visible to every member. Only report real problems. False or abusive reports can get you removed."]),
+    sec("Trades and ranks", [
+      "A trade counts once the buyer confirms they received the card and the ticket shows Completed. It counts for both the seller and the buyer.",
+      "Everyone can see how many trades a member has done.",
+      "Ranks: Bronze at 3 trades, Gold at 5, Platinum at 10 and Diamond at 20.",
+      "A rank shows how much someone has traded. It is not a guarantee, so still follow every step on the ticket."]),
     sec("Your information", [
       "The seller, buyer and middleman on a ticket can see each other's name, cell number and email, so the trade can be completed.",
       "Photos and proof of payment are stored privately and shown only to the people on that ticket and the admin.",
