@@ -436,13 +436,14 @@ html { overflow-y: scroll; scrollbar-gutter: stable; }
 .card a.btn { text-decoration: none; justify-self: start; display: inline-block; }
 .fine-p { color: var(--muted); font-size: 13px; }
 
-.macts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+.macts { display: flex; gap: 8px; flex-wrap: nowrap; flex: none; justify-content: flex-end; align-items: center; }
+.macts .btn { white-space: nowrap; }
 .btn.danger { color: var(--bad); border-color: var(--bad); background: var(--surface); }
 .btn.danger:hover:not(:disabled) { background: var(--bad-bg); }
 .reps { margin-top: 4px; font-size: 13.5px; }
 .reps summary { cursor: pointer; font-weight: 700; color: var(--bad); }
 .rep { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--bad); background: var(--bad-bg); border-radius: 6px; display: grid; gap: 3px; color: var(--ink); overflow-wrap: anywhere; }
-@media (max-width: 640px) { .macts { justify-content: flex-start; } }
+@media (max-width: 640px) { .macts { justify-content: flex-start; } .macts .btn { flex: 1; } }
 
 .rk-ico { display: inline-flex; vertical-align: -3px; }
 .chip.rank { font-weight: 700; display: inline-flex; align-items: center; gap: 2px; }
@@ -1336,8 +1337,7 @@ function memberRow(m) {
       canVouch && h("button", { class: "btn small" + (iVouched ? "" : " primary"), type: "button", onclick: () => toggleVouch(m.id, iVouched) }, iVouched ? "Remove vouch" : "Vouch"),
       S.me && !isMe && (mine
         ? h("button", { class: "btn small", type: "button", onclick: () => rpc("withdraw_report", { p_member: m.id }, "Report withdrawn.") }, "Withdraw report")
-        : h("button", { class: "btn small danger", type: "button", onclick: () => openReport(m) }, "Report")),
-      isAdmin() && !isMe && m.role !== "admin" && h("button", { class: "btn small danger", type: "button", onclick: () => removeMember(m) }, "Remove member")));
+        : h("button", { class: "btn small danger", type: "button", onclick: () => openReport(m) }, "Report"))));
 }
 function removeMember(m) {
   if (!confirm("Remove " + m.name + " from Trade Desk? They will be signed out of the member list and cannot log in. Their past tickets stay on record. You can restore them later from the Admin tab.")) return;
