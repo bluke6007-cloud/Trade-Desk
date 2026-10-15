@@ -425,6 +425,16 @@ html { overflow-y: scroll; scrollbar-gutter: stable; }
 .tab, .tab:hover, .tab[aria-selected="true"], .top .tab[aria-selected="true"] { font-weight: 600; }
 .top .tabs { min-height: 40px; }
 .top .tab { white-space: nowrap; }
+
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.shop-tile { display: grid; gap: 6px; align-content: start; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-top: 5px solid var(--primary); border-radius: 14px; color: var(--ink); text-decoration: none; }
+.shop-tile:hover { box-shadow: 0 6px 20px rgba(17, 20, 24, .12); border-color: var(--ink); }
+.shop-tile strong { font-size: 17px; }
+.shop-tile span { color: var(--muted); font-size: 14px; }
+.shop-tile em { font-style: normal; font-weight: 700; font-size: 14px; margin-top: 4px; }
+.pol-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.card a.btn { text-decoration: none; justify-self: start; display: inline-block; }
+.fine-p { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -450,6 +460,8 @@ html { overflow-y: scroll; scrollbar-gutter: stable; }
     <section id="detail" aria-live="polite"></section>
   </main>
   <section class="page" id="view-how" hidden></section>
+  <section class="page" id="view-policy" hidden></section>
+  <section class="page" id="view-shop" hidden></section>
   <section class="page" id="view-members" hidden></section>
   <section class="page" id="view-admin" hidden></section>
   <section class="page" id="view-auth" hidden></section>
@@ -710,7 +722,7 @@ function roles(t) {
 }
 
 /* ------------------------------------------------------------------ rendering: shell */
-const TABS_ALL = [["home", "Home"], ["tickets", "Tickets"], ["how", "How it works"], ["members", "Members"], ["admin", "Admin"]];
+const TABS_ALL = [["home", "Home"], ["tickets", "Tickets"], ["how", "How it works"], ["policy", "Policy"], ["shop", "Shop"], ["members", "Members"], ["admin", "Admin"]];
 function visibleTabs() {
   return TABS_ALL.filter(([k]) => k !== "admin" || isAdmin());
 }
@@ -731,11 +743,13 @@ function renderShell() {
     h("button", { class: "tab", type: "button", role: "tab", "aria-selected": S.tab === k ? "true" : "false",
       onclick: () => { S.tab = k; render(); window.scrollTo(0, 0); } }, label)));
 
-  const pub = S.tab === "how" || S.tab === "home";
+  const pub = S.tab === "how" || S.tab === "home" || S.tab === "policy" || S.tab === "shop";
   const needsAuth = !pub && !signedIn;
   const needsProfile = !pub && signedIn && !S.me && S.ready;
   $("#view-home").hidden = S.tab !== "home" || S.recovery;
   $("#view-how").hidden = S.tab !== "how";
+  $("#view-policy").hidden = S.tab !== "policy";
+  $("#view-shop").hidden = S.tab !== "shop";
   $("#view-auth").hidden = !(needsAuth || needsProfile || S.recovery);
   $("#view-tickets").hidden = S.tab !== "tickets" || needsAuth || needsProfile || S.recovery;
   $("#view-members").hidden = S.tab !== "members" || needsAuth || needsProfile || S.recovery;
@@ -1391,6 +1405,68 @@ function buildHow() {
       h("p", null, "Never share your password or a photo of your ID in the group chat. Nobody from Trade Desk will ever ask for them.")));
 }
 
+
+/* ------------------------------------------------------------------ policy */
+function buildPolicy() {
+  const sec = (title, items, ordered) => h("div", { class: "card" }, h("h3", null, title),
+    h(ordered ? "ol" : "ul", { class: ordered ? "" : "flags" }, items.map((t) => h("li", null, t))));
+  $("#view-policy").append(
+    h("h2", null, "Trade Desk policy"),
+    h("p", { class: "lead" }, "The rules every member agrees to when they create an account. Version " + TERMS_VERSION + "."),
+    h("div", { class: "card" }, h("h3", null, "Disclaimer"), h("ol", { class: "pol-list" }, DISCLAIMER.map((t) => h("li", null, t)))),
+    sec("The middleman process", [
+      "Every trade goes through the middleman. Never send a card or money directly to the other person.",
+      "The seller opens a ticket with the buyer's full name, cell number and email, and a front and back photo of every card.",
+      "The buyer accepts the ticket in Trade Desk first, then the middleman accepts it.",
+      "The seller ships the card to the middleman. The middleman confirms it arrived and inspects it.",
+      "Only after the card is inspected does the buyer pay the seller. The buyer uploads the " + PROOF_TEXT + " on the ticket.",
+      "The seller confirms payment, then the middleman ships the card to the buyer. The buyer confirms delivery and the ticket is closed."], true),
+    sec("Shipping costs", [
+      "The seller pays for shipping to the middleman.",
+      "The buyer pays for shipping from the middleman to the buyer.",
+      "Always send tracked. Add the tracking number on the ticket."]),
+    sec("Proof of payment and disputes", [
+      "The buyer must upload an " + PROOF_TEXT + ". The seller can only confirm payment after it is uploaded.",
+      "If the seller says the money has not arrived, the card stays with the middleman until it is resolved. This may involve statements from the sending and receiving accounts.",
+      "Disputes that cannot be resolved this way are for the buyer and seller to sort out with their own banks and to post updates on the ticket."]),
+    sec("Your responsibilities", [
+      "Give your real full name, cell number and email. Your full name is your username and other members can see it.",
+      "Describe cards honestly and photograph the front and back clearly.",
+      "Keep the conversation about a trade on its ticket. Flag a dispute instead of carrying on in private messages.",
+      "Never share your password. Nobody from Trade Desk will ask for it or for a photo of your ID."]),
+    sec("Your information", [
+      "The seller, buyer and middleman on a ticket can see each other's name, cell number and email, so the trade can be completed.",
+      "Photos and proof of payment are stored privately and shown only to the people on that ticket and the admin.",
+      "Trade Desk is community-run and not affiliated with any card publisher."]),
+    sec("Admin rights", [
+      "The middleman can step in on any ticket. The admin decides who is verified and can refuse members who break these rules.",
+      "These rules may change. When they do, members may be asked to agree again."]));
+}
+
+/* ------------------------------------------------------------------ shop */
+const SHOP = "https://www.geek-zone.co.za";
+function buildShop() {
+  const tile = (title, text, path) => h("a", { class: "shop-tile", href: SHOP + path, target: "_blank", rel: "noopener noreferrer" },
+    h("strong", null, title), h("span", null, text), h("em", null, "Shop now \u2192"));
+  $("#view-shop").append(
+    h("h2", null, "Shop Geek-Zone"),
+    h("p", { class: "lead" }, "Geek-Zone is a local South African store for Pok\u00e9mon cards and collectibles. Browse the store, then come back here to trade safely."),
+    h("div", { class: "shop-grid" },
+      tile("Pok\u00e9mon sealed", "Booster boxes, blisters, Elite Trainer Boxes", "/shop/pokemon/pokemon-sealed/"),
+      tile("Pok\u00e9mon singles", "Single cards for your deck or collection", "/shop/pokemon/pokemon-singles/"),
+      tile("Graded cards", "Graded Pok\u00e9mon cards", "/shop/pokemon/graded-pokemon-cards/"),
+      tile("Binders and accessories", "Protect and show off your cards", "/shop/pokemon/binders-and-accessories/"),
+      tile("30th Anniversary", "Pok\u00e9mon 30th Anniversary range", "/shop/pokemon-30th-anniversary/"),
+      tile("One Piece", "One Piece card game", "/shop/tcg/one-piece/"),
+      tile("Magic: The Gathering", "Magic: The Gathering products", "/shop/tcg/magic-the-gathering/"),
+      tile("Geek-Zone Vault", "Geek-Zone Pok\u00e9mon exclusives", "/shop/geek-zone-pokemon-exclusives/"),
+      tile("Auctions", "Bid on cards and collectibles", "/shop/auctions/"),
+      tile("Sale", "Current specials", "/shop/sale/")),
+    h("div", { class: "card" },
+      h("a", { class: "btn primary big", href: SHOP + "/", target: "_blank", rel: "noopener noreferrer" }, "Open the Geek-Zone store"),
+      h("p", { class: "fine-p" }, "The store opens in a new tab. Prices and stock are shown on the store. Buying from Geek-Zone is separate from a Trade Desk ticket.")));
+}
+
 /* ------------------------------------------------------------------ home (landing page) */
 const go = (tab) => { S.tab = tab; render(); window.scrollTo(0, 0); };
 function startTrade() {
@@ -1434,7 +1510,7 @@ function renderHome() {
         h("button", { class: "btn primary big", type: "button", id: "band-cta", onclick: startTrade }))));
     $("#foot").append(h("div", { class: "foot-in" },
       h("div", null, h("img", { class: "foot-logo", src: LOGO_URI, alt: "Geek-Zone" }), h("strong", null, "Trade Desk"), h("p", null, "Always use a ticket. Never send a card to anyone except the middleman named on it.")),
-      h("div", { class: "foot-links" }, [["home", "Home"], ["how", "How it works"], ["members", "Members"]].map(([k, l]) => h("button", { class: "linkbtn", type: "button", onclick: () => go(k) }, l))),
+      h("div", { class: "foot-links" }, [["home", "Home"], ["how", "How it works"], ["policy", "Policy"], ["shop", "Shop"], ["members", "Members"]].map(([k, l]) => h("button", { class: "linkbtn", type: "button", onclick: () => go(k) }, l))),
       h("p", { class: "fine" }, "© 2026 Trade Desk. Community-run. Not affiliated with any card publisher.")));
   }
   const label = !S.session ? "Create your account" : "Open a ticket";
@@ -1461,6 +1537,8 @@ $("#btn-out").addEventListener("click", async () => { await sb.auth.signOut(); }
 $("#search").addEventListener("input", (e) => { S.q = e.target.value; renderList(); });
 
 buildHow();
+buildPolicy();
+buildShop();
 buildMembers();
 render();
 
