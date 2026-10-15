@@ -309,7 +309,10 @@ dialog::backdrop { background: rgba(10, 14, 22, .55); }
 .check-line { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
 .check-line input { margin-top: 4px; }
 .field input[type="file"] { padding: 7px; }
-select.field-select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.aacts { display: grid; grid-template-columns: 130px 92px; gap: 8px; align-items: center; justify-items: stretch; flex: none; }
+.aacts .btn { text-align: center; white-space: nowrap; }
+@media (max-width: 640px) { .aacts { grid-template-columns: 1fr 1fr; } }
+select.field-select { height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
 .setup { max-width: 640px; margin: 40px auto; padding: 0 20px; }
 
 /* ---- polish ---- */
@@ -1436,22 +1439,23 @@ function renderAdmin() {
     return h("div", { class: "mrow" },
       h("div", { class: "l" },
         h("span", { class: "nm" }, m.name),
-        h("span", { class: "sm" }, "Cell: " + (p.cell || "none") + ". Joined " + when(m.created_at) + (m.verified_at ? ". Verified " + when(m.verified_at) + (p.verify_note ? ". Method: " + p.verify_note : "") : "")),),
-      h("div", { class: "actions" },
-        !verifiedList && h("button", { class: "btn small primary", type: "button", onclick: () => {
+        h("span", { class: "sm" }, "Cell: " + (p.cell || "none") + ". Joined " + when(m.created_at) + (m.verified_at ? ". Verified " + when(m.verified_at) + (p.verify_note ? ". Method: " + p.verify_note : "") : "")),
+        verifiedList && m.id !== S.me.id ? h("button", { class: "linkbtn", style: "justify-self:start", type: "button", onclick: () => rpc("revoke_verification", { p_user: m.id }, "Verification removed.") }, "Revoke verification") : null),
+      h("div", { class: "aacts" },
+        verifiedList ? (() => {
+          const sel = h("select", { class: "field-select", "aria-label": "Role for " + m.name, disabled: m.id === S.me.id },
+            [["member", "Member"], ["middleman", "Middleman"], ["admin", "Admin"]].map(([r, l]) => h("option", { value: r }, l)));
+          sel.value = m.role;
+          sel.addEventListener("change", () => rpc("set_role", { p_user: m.id, p_role: sel.value }, "Role updated."));
+          return sel;
+        })() : h("button", { class: "btn small primary", type: "button", onclick: () => {
           const note = AD.note.value.trim();
           if (note.length < 3) { toast("Write how you verified them first."); return; }
           rpc("verify_member", { p_user: m.id, p_note: note }, m.name + " verified.");
         } }, "Verify"),
-        m.id !== S.me.id && m.role !== "admin" && h("button", { class: "btn small danger", type: "button", onclick: () => removeMember(m) }, "Remove"),
-        verifiedList && h("button", { class: "btn small danger", type: "button", onclick: () => rpc("revoke_verification", { p_user: m.id }, "Verification removed.") }, "Revoke"),
-        verifiedList && (() => {
-          const sel = h("select", { class: "field-select", "aria-label": "Role for " + m.name, disabled: m.id === S.me.id },
-            ["member", "middleman", "admin"].map((r) => h("option", { value: r }, r)));
-          sel.value = m.role;
-          sel.addEventListener("change", () => rpc("set_role", { p_user: m.id, p_role: sel.value }, "Role updated."));
-          return sel;
-        })()));
+        m.id !== S.me.id && m.role !== "admin"
+          ? h("button", { class: "btn small danger", type: "button", onclick: () => removeMember(m) }, "Remove")
+          : h("span", { "aria-hidden": "true" })));
   };
   const pending = S.members.filter((m) => !m.verified_at);
   const verified = S.members.filter((m) => m.verified_at);
